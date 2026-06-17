@@ -1,0 +1,474 @@
+// Customs Control Tower — Module 1 — ONE authoritative schema for EVERY module.
+// Owner: Builder A. Builders B and C import the generated client and NEVER edit this file.
+// Authoritative source: architecture_spec.md §3 (reconciles process_map.md, icm_spec schema, design_spec).
+//
+// Conventions (technical.md): tables snake_case plural via @@map; PK uuid (v4); FKs {singular}_id;
+// every domain table has created_at / updated_at / is_archived (soft delete — records are never hard-deleted).
+// Bilingual fields are explicit *_es / *_en columns (Spanish-first: _es is the source of truth, _en may be null).
+// rag_status is DERIVED + denormalized (recomputed by process-registry); confidence and classification are
+// orthogonal channels. RLS is applied in a dedicated migration (viewer = SELECT-only; audit_events append-only).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  editor
+  viewer
+  admin
+}
+
+enum LanguageCode {
+  es
+  en
+}
+
+enum ProcessStatus {
+  draft
+  active
+  archived
+}
+
+enum StepType {
+  TRANSFORMATION
+  VERIFICATION
+  ROUTING
+  COMMUNICATION
+  DOCUMENTATION
+}
+
+enum Classification {
+  CRITICAL
+  AUTOMATABLE
+  REPETITIVE
+  CANDIDATE_FOR_REMOVAL
+}
+
+enum Confidence {
+  CONFIRMED
+  INFERRED
+  FLAGGED
+}
+
+enum RagStatus {
+  green
+  amber
+  red
+  unknown
+}
+
+enum HandoffKind {
+  sequential
+  branch
+  loop
+  parallel
+}
+
+enum PartyKind {
+  internal_editor
+  internal_viewer
+  external
+}
+
+enum IoKind {
+  information
+  material
+}
+
+enum StepIoRole {
+  input
+  output
+}
+
+enum StepDocumentRole {
+  consumes
+  produces
+  references
+}
+
+enum DocType {
+  PurchaseOrder
+  CommercialInvoice
+  PackingList
+  BillOfLading
+  CartaPorte
+  CertificateOfOrigin
+  Permit_NOM
+  Pedimento
+  PaymentReceipt
+  InspectionActa
+  GoodsReceipt
+  Expediente
+  Other
+}
+
+enum DocFormat {
+  PDF
+  XLS
+  DOCX
+  XML
+  other
+}
+
+enum OutboxStatus {
+  pending
+  delivered
+  dead
+}
+
+enum DraftStatus {
+  in_interview
+  ready_for_review
+}
+
+enum AiRunKind {
+  interview_turn
+  interview_finish
+  freshness_scan
+}
+
+// ============================================================================
+// M0 — platform-core  (owns: event_outbox, audit_events, app_settings)
+// ============================================================================
+
+model EventOutbox {
+  id          String       @id @default(uuid()) @db.Uuid
+  event_type  String
+  source_node String
+  payload     Json
+  metadata    Json
+  status      OutboxStatus @default(pending)
+  retries     Int          @default(0)
+  created_at  DateTime     @default(now())
+  delivered_at DateTime?
+
+  @@index([status, created_at])
+  @@map("event_outbox")
+}
+
+// Append-only. RLS revokes UPDATE/DELETE (see RLS migration).
+model AuditEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  event_type  String
+  actor_id    String?  @db.Uuid
+  actor_type  String
+  entity_id   String?  @db.Uuid
+  entity_type String?
+  payload     Json
+  timestamp   DateTime @default(now())
+  session_id  String?  @db.Uuid
+
+  @@index([entity_type, entity_id])
+  @@index([timestamp])
+  @@map("audit_events")
+}
+
+model AppSetting {
+  key        String   @id
+  value_json Json
+  updated_by String?  @db.Uuid
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("app_settings")
+}
+
+// ============================================================================
+// M1 — auth-rbac  (owns: users, user_sessions)
+// ============================================================================
+
+model User {
+  id              String       @id @default(uuid()) @db.Uuid
+  email           String       @unique
+  password_hash   String
+  role            UserRole     @default(editor)
+  language_pref   LanguageCode @default(es)
+  is_active       Boolean      @default(true)
+  failed_attempts Int          @default(0)
+  locked_until    DateTime?
+  created_at      DateTime     @default(now())
+  updated_at      DateTime     @default(now()) @updatedAt
+  is_archived     Boolean      @default(false)
+
+  sessions               UserSession[]
+  parties                ResponsibleParty[]
+  processes_created      Process[]          @relation("ProcessCreatedBy")
+  processes_updated      Process[]          @relation("ProcessUpdatedBy")
+  steps_created          Step[]             @relation("StepCreatedBy")
+  steps_updated          Step[]             @relation("StepUpdatedBy")
+  documents_uploaded     Document[]
+
+  @@map("users")
+}
+
+model UserSession {
+  id         String    @id @default(uuid()) @db.Uuid
+  user_id    String    @db.Uuid
+  expires_at DateTime
+  created_at DateTime  @default(now())
+  revoked_at DateTime?
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@map("user_sessions")
+}
+
+// ============================================================================
+// M2 — process-registry
+//   owns: processes, steps, handoffs, responsible_parties, io_items, step_io, step_documents
+// ============================================================================
+
+model Process {
+  id                     String        @id @default(uuid()) @db.Uuid
+  title_es               String
+  title_en               String?
+  description_es         String?
+  description_en         String?
+  domain                 String?       @default("IMMEX import MX←US")
+  overall_owner_party_id String?       @db.Uuid
+  status                 ProcessStatus @default(draft)
+  language_default       LanguageCode  @default(es)
+  created_at             DateTime      @default(now())
+  updated_at             DateTime      @default(now()) @updatedAt
+  is_archived            Boolean       @default(false)
+  created_by             String?       @db.Uuid
+  updated_by             String?       @db.Uuid
+
+  overall_owner ResponsibleParty? @relation("ProcessOverallOwner", fields: [overall_owner_party_id], references: [id])
+  created_by_user User?           @relation("ProcessCreatedBy", fields: [created_by], references: [id])
+  updated_by_user User?           @relation("ProcessUpdatedBy", fields: [updated_by], references: [id])
+
+  steps     Step[]
+  handoffs  Handoff[]
+  io_items  IoItem[]
+
+  @@index([status])
+  @@map("processes")
+}
+
+model Step {
+  id                  String          @id @default(uuid()) @db.Uuid
+  process_id          String          @db.Uuid
+  sequence_index      Int
+  title_es            String
+  title_en            String?
+  description_es      String?
+  description_en      String?
+  trigger_es          String?
+  trigger_en          String?
+  action_es           String?
+  action_en           String?
+  reason_es           String?
+  reason_en           String?
+  step_type           StepType?
+  classification      Classification?
+  confidence          Confidence      @default(INFERRED)
+  common_issues_es    String?
+  common_issues_en    String?
+  responsible_party_id String?        @db.Uuid
+  rag_status          RagStatus       @default(unknown)
+  last_reviewed_at    DateTime?
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @default(now()) @updatedAt
+  is_archived         Boolean         @default(false)
+  created_by          String?         @db.Uuid
+  updated_by          String?         @db.Uuid
+
+  process           Process           @relation(fields: [process_id], references: [id])
+  responsible_party ResponsibleParty? @relation("StepResponsibleParty", fields: [responsible_party_id], references: [id])
+  created_by_user   User?             @relation("StepCreatedBy", fields: [created_by], references: [id])
+  updated_by_user   User?             @relation("StepUpdatedBy", fields: [updated_by], references: [id])
+
+  handoffs_out   Handoff[]      @relation("HandoffFromStep")
+  handoffs_in    Handoff[]      @relation("HandoffToStep")
+  step_io        StepIo[]
+  step_documents StepDocument[]
+
+  // UNIQUE(process_id, sequence_index) is enforced as a partial index (non-archived only) in the RLS/constraints migration.
+  @@index([process_id])
+  @@map("steps")
+}
+
+model Handoff {
+  id           String      @id @default(uuid()) @db.Uuid
+  process_id   String      @db.Uuid
+  from_step_id String      @db.Uuid
+  to_step_id   String      @db.Uuid
+  kind         HandoffKind
+  condition_es String?
+  condition_en String?
+  created_at   DateTime    @default(now())
+  updated_at   DateTime    @default(now()) @updatedAt
+  is_archived  Boolean     @default(false)
+
+  process   Process @relation(fields: [process_id], references: [id])
+  from_step Step    @relation("HandoffFromStep", fields: [from_step_id], references: [id])
+  to_step   Step    @relation("HandoffToStep", fields: [to_step_id], references: [id])
+
+  // CHECK (kind NOT IN ('branch','loop') OR condition_es IS NOT NULL) added in the constraints migration.
+  @@index([process_id])
+  @@index([from_step_id])
+  @@index([to_step_id])
+  @@map("handoffs")
+}
+
+model ResponsibleParty {
+  id             String    @id @default(uuid()) @db.Uuid
+  name           String
+  role           String?
+  email          String?
+  organization   String?
+  party_kind     PartyKind
+  user_id        String?   @db.Uuid
+  key_person_risk Boolean  @default(false)
+  backup_noted   Boolean   @default(false)
+  notes_es       String?
+  notes_en       String?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  is_archived    Boolean   @default(false)
+
+  user User? @relation(fields: [user_id], references: [id])
+
+  steps             Step[]    @relation("StepResponsibleParty")
+  processes_owned   Process[] @relation("ProcessOverallOwner")
+
+  @@map("responsible_parties")
+}
+
+model IoItem {
+  id             String  @id @default(uuid()) @db.Uuid
+  process_id     String  @db.Uuid
+  name_es        String
+  name_en        String?
+  kind           IoKind
+  description_es  String?
+  description_en  String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+  is_archived    Boolean  @default(false)
+
+  process Process  @relation(fields: [process_id], references: [id])
+  step_io StepIo[]
+
+  @@index([process_id])
+  @@map("io_items")
+}
+
+model StepIo {
+  step_id    String     @db.Uuid
+  io_item_id String     @db.Uuid
+  role       StepIoRole
+
+  step    Step   @relation(fields: [step_id], references: [id])
+  io_item IoItem @relation(fields: [io_item_id], references: [id])
+
+  @@id([step_id, io_item_id, role])
+  @@map("step_io")
+}
+
+model StepDocument {
+  step_id     String           @db.Uuid
+  document_id String           @db.Uuid
+  role        StepDocumentRole
+
+  step     Step     @relation(fields: [step_id], references: [id])
+  document Document @relation(fields: [document_id], references: [id])
+
+  @@id([step_id, document_id, role])
+  @@map("step_documents")
+}
+
+// ============================================================================
+// M3 — documents  (owns: documents metadata; bytes live in object storage)
+// ============================================================================
+
+model Document {
+  id               String     @id @default(uuid()) @db.Uuid
+  name             String
+  doc_type         DocType
+  format           DocFormat
+  canonical_term_es String?
+  canonical_term_en String?
+  storage_path     String?
+  content_type     String?
+  size_bytes       BigInt?
+  uploaded_by      String?    @db.Uuid
+  created_at       DateTime   @default(now())
+  updated_at       DateTime   @default(now()) @updatedAt
+  is_archived      Boolean    @default(false)
+
+  uploaded_by_user User?          @relation(fields: [uploaded_by], references: [id])
+  step_documents   StepDocument[]
+
+  // CHECK (canonical_term_es IS NOT NULL OR canonical_term_en IS NOT NULL) added in the constraints migration.
+  @@map("documents")
+}
+
+// ============================================================================
+// M4 — ai-gateway  (owns: process_drafts, freshness_reports, ai_runs)
+//   The AI layer's own records. Maps 1:1 onto the published registry but is NEVER the published row.
+//   The full draft graph (steps/handoffs/parties/io/documents/coverage_gaps/confidence_flags/events)
+//   is stored as JSONB blobs matching icm_spec/_database/schema.json process_draft.
+// ============================================================================
+
+model ProcessDraft {
+  id               String      @id @default(uuid()) @db.Uuid
+  status           DraftStatus @default(in_interview)
+  language         LanguageCode @default(es)
+  editor_id        String?     @db.Uuid
+  process_seed     Json?
+  draft            Json        @default("{}")
+  coverage_gaps    Json        @default("[]")
+  confidence_flags Json        @default("[]")
+  events           Json        @default("[]")
+  published_process_id String? @db.Uuid
+  created_at       DateTime    @default(now())
+  updated_at       DateTime    @default(now()) @updatedAt
+  is_archived      Boolean     @default(false)
+
+  @@index([status])
+  @@map("process_drafts")
+}
+
+model FreshnessReport {
+  id              String   @id @default(uuid()) @db.Uuid
+  process_id      String   @db.Uuid
+  scanned_at      DateTime @default(now())
+  trigger         String?
+  flags           Json     @default("[]")
+  suggested_edits Json     @default("[]")
+  summary_es      String?
+  summary_en      String?
+  created_at      DateTime @default(now())
+
+  @@index([process_id, scanned_at])
+  @@map("freshness_reports")
+}
+
+model AiRun {
+  id                        String    @id @default(uuid()) @db.Uuid
+  kind                      AiRunKind
+  draft_id                  String?   @db.Uuid
+  process_id                String?   @db.Uuid
+  model                     String
+  input_tokens              Int?
+  output_tokens             Int?
+  cache_read_input_tokens   Int?
+  cache_creation_input_tokens Int?
+  latency_ms                Int?
+  cost_usd_est              Decimal?  @db.Decimal(12, 6)
+  created_at                DateTime  @default(now())
+
+  @@index([kind, created_at])
+  @@map("ai_runs")
+}

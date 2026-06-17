@@ -1,0 +1,80 @@
+/* Free DENSE neo-grotesque (Inter Tight via @fontsource — NOT stock Inter) + IBM Plex Mono for data/numerals.
+   visual_spec names Söhne (paid); per the build note we use a free face that honors the intent and keep every
+   other token exact. The CSS family stack in `body` (and tailwind fontFamily.ui) lists 'Inter Tight' first. */
+@import '@fontsource-variable/inter-tight/index.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Determinate accent progress bar keyframes — the ONLY loading motion (Banned List #5: no shimmer/spinner). */
+@keyframes cct-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* Control Room Slate design tokens as CSS variables (mirror tailwind.config.ts).
+   Builder C: use the Tailwind classes; reach for these variables only where a raw CSS value is needed
+   (e.g. React Flow node styles, canvas drawing). Do NOT introduce new colors or a second accent. */
+:root {
+  /* Board surface (dark instrument) */
+  --board-bg: #0e1419;
+  --board-panel: #161e26;
+  --board-raised: #1e2932;
+  --board-hover: #26323c;
+  --board-line: #2c3a45;
+  --board-line-light: #3a4a55;
+
+  /* Document surface (lighter reading sheet) */
+  --doc-bg: #161b20;
+  --doc-surface: #e8ebe6;
+  --doc-raised: #f1f3ee;
+  --doc-line: #cdd3cb;
+
+  /* Ink */
+  --ink: #0c1116;
+  --ink-muted: #46505a;
+  --ink-onboard: #e4eaef;
+  --ink-onboard-muted: #8b9aa6;
+
+  /* The one accent — calibration cyan */
+  --accent: #3fb6c9;
+  --accent-press: #2e94a4;
+  --accent-deep: #247e8c;
+  --accent-ghost: rgba(63, 182, 201, 0.14);
+
+  /* RAG status — health only */
+  --status-green: #27b85c;
+  --status-amber: #e8a317;
+  --status-red: #e5484d;
+  --status-grey: #5a6a75;
+
+  --radius: 2px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter Tight Variable', 'Inter Tight', 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--board-bg);
+  color: var(--ink-onboard);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'tnum' 1, 'cv01' 1; /* tabular numerals, mandatory (visual_spec §B) */
+}
+
+/* Respect prefers-reduced-motion: drop transitions to instant (visual_spec motion token). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

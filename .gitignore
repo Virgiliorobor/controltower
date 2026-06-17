@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Environment — never commit real secrets
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+server/dist/
+web/dist/
+server/src/generated/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,23 @@
+{
+  "name": "customs-control-tower",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Customs Control Tower — Module 1 (Process). Modular monolith: Fastify API + React SPA, deployed on the owner's VPS via Coolify. No localhost.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run build:web && npm run build:server",
+    "build:web": "npm run build --workspace web",
+    "build:server": "npm run build --workspace server",
+    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
+    "migrate": "npm run migrate --workspace server",
+    "seed": "npm run seed --workspace server",
+    "start": "npm run start --workspace server"
+  }
+}

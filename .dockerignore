@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/build
+**/.git
+**/.env
+**/.env.*
+!**/.env.example
+**/npm-debug.log*
+**/.DS_Store
+**/server/src/generated
