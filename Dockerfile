@@ -58,17 +58,16 @@ RUN npm ci --omit=dev
 
 # Prisma: @prisma/client is installed above; overlay the generated .prisma/ client from server-build.
 COPY --from=server-build /app/node_modules/.prisma ./node_modules/.prisma
-# Schema needed by `prisma migrate deploy` (the Coolify release step).
-COPY --from=server-build /app/server/prisma ./prisma
 
-# Compiled server. tsconfig.json has outDir=dist relative to server/, so output is at server/dist/.
-# Flatten to /app/dist so CMD stays: node dist/index.js from WORKDIR /app.
-COPY --from=server-build /app/server/dist ./dist
+# Keep server artifacts under server/ so npm workspace scripts run from /app/server/ find them.
+# This means `npm run seed` and `npm run migrate` work correctly from the container terminal.
+COPY --from=server-build /app/server/prisma ./server/prisma
+COPY --from=server-build /app/server/dist ./server/dist
 
 # The built SPA, served as static + SPA fallback by the Fastify app.
 COPY --from=web-build /app/web/dist ./web
 
-# The server reads WEB_DIST_DIR to locate the static bundle (defaults to ./web beside dist/).
+# The server reads WEB_DIST_DIR to locate the static bundle.
 ENV WEB_DIST_DIR=/app/web
 ENV PORT=8080
 EXPOSE 8080
@@ -78,7 +77,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/readyz || exit 1
 
-# Run migrations then start the server. `prisma migrate deploy` is idempotent — safe on every
-# startup and required on the first deploy to create tables before the app queries them.
-# `prisma` CLI is a production dependency so it is available in this runtime image.
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/index.js"]
+# Run migrations then start the server.
+# --schema path is relative to WORKDIR /app (schema now lives at server/prisma/).
+# `prisma migrate deploy` is idempotent — safe on every restart.
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy --schema=server/prisma/schema.prisma && node server/dist/index.js"]
