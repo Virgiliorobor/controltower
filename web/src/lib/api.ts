@@ -37,7 +37,10 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
     ...rest,
     credentials: 'include',
     headers: {
-      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      // Only set Content-Type when there is a body to send. Fastify rejects requests
+      // that arrive with Content-Type: application/json but an empty body (logout,
+      // confirm, archive, publish — all POST with no payload).
+      ...(isFormData || body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...headers,
     },
     body: body === undefined ? undefined : isFormData ? (body as FormData) : JSON.stringify(body),
