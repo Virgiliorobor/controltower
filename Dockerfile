@@ -9,6 +9,10 @@
 # ---------- Stage 1: web build ----------
 FROM node:20-alpine AS web-build
 WORKDIR /app
+# Override any injected NODE_ENV=production (Coolify passes it as a build arg by default).
+# npm ci respects NODE_ENV and skips devDependencies when NODE_ENV=production, which would
+# omit TypeScript and Vite — breaking the build. Build stages need devDependencies.
+ENV NODE_ENV=development
 # Workspace root manifests (the single lockfile lives at the root).
 COPY package.json package-lock.json ./
 # Both workspace package.json files are required for npm ci to resolve workspace members.
@@ -21,6 +25,7 @@ RUN npm run build:web
 # ---------- Stage 2: server build ----------
 FROM node:20-alpine AS server-build
 WORKDIR /app
+ENV NODE_ENV=development
 COPY package.json package-lock.json ./
 COPY server/package.json ./server/package.json
 COPY web/package.json ./web/package.json
