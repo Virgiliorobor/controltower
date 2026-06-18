@@ -86,13 +86,22 @@ function MapInner(): JSX.Element {
   }, [graph, selectedStepId, dimmedIds, freshnessStepIds, locale, t]);
 
   // Default Fit on load / when the node set changes.
+  // 200ms gives React Flow's ResizeObserver time to measure node heights before fitView
+  // calculates the bounding box. setTimeout(0) races with measurement and can produce
+  // a wrong viewport (nodes positioned off-screen or stacked at the canvas edge).
   useEffect(() => {
     if (rfNodes.length > 0) {
-      const id = window.setTimeout(() => rf.fitView({ padding: 0.2, duration: 0 }), 0);
+      const id = window.setTimeout(() => rf.fitView({ padding: 0.2, duration: 0 }), 200);
       return () => window.clearTimeout(id);
     }
     return undefined;
   }, [rf, rfNodes.length, processId]);
+
+  // Secondary fitView on React Flow init. Fires when React Flow first mounts and measures
+  // the container. If nodes are already in rfNodes at that point, fit immediately.
+  const onRfInit = useCallback(() => {
+    if (rfNodes.length > 0) rf.fitView({ padding: 0.2, duration: 0 });
+  }, [rf, rfNodes.length]);
 
   const onNodeClick = useCallback(
     (_: unknown, node: Node<StepNodeData>) => {
@@ -195,6 +204,7 @@ function MapInner(): JSX.Element {
           edgeTypes={edgeTypes}
           onNodeClick={onNodeClick}
           onPaneClick={closePanel}
+          onInit={onRfInit}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.2}

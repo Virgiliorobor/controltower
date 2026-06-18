@@ -9,6 +9,7 @@ import type { StepNodeData } from './StepNode';
 const COL_W = 280; // horizontal spacing between sequence columns
 const ROW_H = 130; // vertical spacing for branch fan-out
 const NODE_W = 196;
+const NODE_H = 88; // approximate height — lets fitView calculate before ResizeObserver fires
 
 export interface LayoutInput {
   nodes: GraphNode[];
@@ -83,6 +84,7 @@ export function layoutGraph(input: LayoutInput): LaidOut {
         freshnessActive: freshnessStepIds.has(n.id),
       },
       width: NODE_W,
+      height: NODE_H,
       draggable: false,
       selectable: true,
     };
