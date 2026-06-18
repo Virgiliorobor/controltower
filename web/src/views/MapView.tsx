@@ -207,13 +207,15 @@ function MapInner(): JSX.Element {
           onInit={onRfInit}
           fitView
           fitViewOptions={{ padding: 0.2 }}
-          minZoom={0.2}
+          defaultViewport={{ x: 20, y: 80, zoom: 0.5 }}
+          minZoom={0.15}
           maxZoom={2}
           proOptions={{ hideAttribution: true }}
           nodesDraggable={false}
           nodesConnectable={false}
         >
-          <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1E2932" />
+          {/* Dot color #13202B contrasts with node background #1E2932 so nodes are visible at small zoom. */}
+          <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#13202B" />
           <Controls showInteractive={false} />
           <MiniMap
             pannable

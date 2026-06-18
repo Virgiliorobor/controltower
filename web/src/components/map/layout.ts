@@ -6,7 +6,7 @@ import { MarkerType, type Edge, type Node } from 'reactflow';
 import type { GraphEdge, GraphNode } from '../../lib/types';
 import type { StepNodeData } from './StepNode';
 
-const COL_W = 280; // horizontal spacing between sequence columns
+const COL_W = 216; // horizontal spacing between sequence columns
 const ROW_H = 130; // vertical spacing for branch fan-out
 const NODE_W = 196;
 const NODE_H = 88; // approximate height — lets fitView calculate before ResizeObserver fires
