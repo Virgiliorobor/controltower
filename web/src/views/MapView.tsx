@@ -111,7 +111,7 @@ function MapInner(): JSX.Element {
   }
 
   return (
-    <div className="relative flex-1" style={{ height: 'calc(100vh - 48px)' }}>
+    <div className="relative h-full overflow-hidden">
       {/* Seed/draft banner (visual_spec §3). */}
       {seedBanner && (
         <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 border-b border-status-amber bg-status-amber/10 px-4 py-2 text-2xs text-status-amber">

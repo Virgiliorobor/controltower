@@ -37,9 +37,11 @@ function Protected({ children, role }: { children: JSX.Element; role?: 'editor' 
 
 function Shell({ children }: { children: JSX.Element }): JSX.Element {
   return (
-    <div className="flex min-h-screen flex-col bg-board-bg text-ink-onboard font-ui">
+    // h-screen gives a definite 100vh height so flex-1 children resolve correctly.
+    // overflow-auto lets scrollable views (Library, Admin, etc.) scroll naturally.
+    <div className="flex h-screen flex-col bg-board-bg text-ink-onboard font-ui">
       <TopBar />
-      <div className="flex flex-1 flex-col">{children}</div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
     </div>
   );
 }
