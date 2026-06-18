@@ -1,8 +1,9 @@
 # Customs Control Tower — Coolify / VPS deployment descriptor (NOT a localhost dev setup).
-# Three services on the owner's VPS: the app (Fastify + React build), PostgreSQL 16, MinIO object storage.
+# Default: app (Fastify + React build) + PostgreSQL 16. Document bytes are stored on a persistent disk volume
+# (STORAGE_DRIVER=fs) mounted into the app — no extra service. To use S3-compatible storage instead, set
+# STORAGE_DRIVER=s3 + the S3_* vars and uncomment the cct-minio service (or point S3_* at external S3/R2).
 # Two named volumes persist data across redeploys: postgres-data, documents-objects.
 # All secret values come from the environment Coolify injects (${...}); nothing secret is committed.
-# Service hostnames (cct-postgres, cct-minio) are the live internal endpoints — never localhost.
 
 services:
   cct-app:
@@ -13,7 +14,6 @@ services:
     restart: unless-stopped
     depends_on:
       - cct-postgres
-      - cct-minio
     environment:
       NODE_ENV: production
       PORT: "8080"
@@ -24,19 +24,26 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-es}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
-      S3_ENDPOINT: ${S3_ENDPOINT}
+      # Document storage (fs default — bytes on the documents-objects volume below).
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-fs}
+      DOCUMENTS_DIR: ${DOCUMENTS_DIR:-/data/documents}
+      DOCUMENT_MAX_BYTES: ${DOCUMENT_MAX_BYTES:-10485760}
+      # s3 driver only (ignored when STORAGE_DRIVER=fs):
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${S3_BUCKET:-cct-documents}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
       S3_SIGNED_URL_TTL: ${S3_SIGNED_URL_TTL:-86400}
-      DOCUMENT_MAX_BYTES: ${DOCUMENT_MAX_BYTES:-10485760}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       INTERVIEW_MODEL: ${INTERVIEW_MODEL:-claude-opus-4-8}
       FRESHNESS_MODEL: ${FRESHNESS_MODEL:-claude-haiku-4-5}
       FRESHNESS_CRON_ENABLED: ${FRESHNESS_CRON_ENABLED:-true}
       FRESHNESS_CRON: ${FRESHNESS_CRON:-0 6 * * *}
+    volumes:
+      # Document bytes live here (STORAGE_DRIVER=fs). Persists across redeploys.
+      - documents-objects:/data/documents
     healthcheck:
       # /readyz also confirms the DB is reachable. In-container loopback only (Docker health convention).
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
@@ -58,16 +65,18 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  cct-minio:
-    image: minio/minio:latest
-    container_name: cct-minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
-    volumes:
-      - documents-objects:/data
+  # Optional — only when STORAGE_DRIVER=s3. Uncomment, set S3_ACCESS_KEY/S3_SECRET_KEY, and create the
+  # cct-documents bucket. Then the app's S3_ENDPOINT is http://cct-minio:9000.
+  # cct-minio:
+  #   image: minio/minio:latest
+  #   container_name: cct-minio
+  #   restart: unless-stopped
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+  #     MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+  #   volumes:
+  #     - documents-objects:/data
 
 volumes:
   postgres-data:

@@ -9,7 +9,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { DocFormat, DocType, Document } from '@prisma/client';
 import type { AppContext } from '../../core/context.js';
 import { NotFoundError, ValidationError } from '../../core/errors.js';
-import { ObjectStorage } from './storage.js';
+import { createStorage, type StorageDriver } from './storage.js';
 
 const SOURCE_NODE = 'documents';
 
@@ -50,10 +50,10 @@ export interface ActorMeta {
 }
 
 export class DocumentsService {
-  private readonly storage: ObjectStorage;
+  private readonly storage: StorageDriver;
 
   constructor(private readonly ctx: AppContext) {
-    this.storage = new ObjectStorage(ctx.config, ctx.logger);
+    this.storage = createStorage(ctx.config, ctx.logger);
   }
 
   private extensionOf(filename: string): string {
@@ -135,15 +135,36 @@ export class DocumentsService {
   async getMetadataWithUrl(id: string): Promise<{ document: Document; url: string | null }> {
     const document = await this.ctx.db.document.findUnique({ where: { id } });
     if (!document || document.is_archived) throw new NotFoundError('Document not found');
-    const url = document.storage_path
-      ? await this.storage.signedGetUrl(document.storage_path, document.content_type ?? undefined)
-      : null;
+    // Retrieval differs by driver: s3 → a short-lived presigned URL to the object store; fs → an authenticated
+    // same-origin app route that streams the bytes (the browser sends the session cookie automatically).
+    let url: string | null = null;
+    if (document.storage_path) {
+      url =
+        this.storage.kind === 's3'
+          ? await this.storage.signedGetUrl(document.storage_path, document.content_type ?? undefined)
+          : `/api/v1/documents/${document.id}/content`;
+    }
     await this.ctx.bus.emit(
       'file.retrieve_requested',
       { id: document.id },
       { source_node: SOURCE_NODE, metadata: { triggered_by: 'user.action' } },
     );
     return { document, url };
+  }
+
+  // Stream a document's bytes (used by the fs-driver retrieval route; also works for s3). Auth is enforced at
+  // the route (any authenticated role). The AI never reaches this — it has no access to documents.
+  async readContent(id: string): Promise<{ bytes: Buffer; contentType: string; filename: string }> {
+    const document = await this.ctx.db.document.findUnique({ where: { id } });
+    if (!document || document.is_archived || !document.storage_path) {
+      throw new NotFoundError('Document not found');
+    }
+    const bytes = await this.storage.read(document.storage_path);
+    return {
+      bytes,
+      contentType: document.content_type ?? 'application/octet-stream',
+      filename: document.name,
+    };
   }
 
   async updateMetadata(

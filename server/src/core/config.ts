@@ -8,6 +8,9 @@ const booleanFromString = z
   .transform((value) => value.toLowerCase() === 'true' || value === '1')
   .pipe(z.boolean());
 
+// Treat an empty-string env var (common when a docker-compose passes ${VAR} for an unset var) as "not set".
+const emptyToUndefined = (value: unknown): unknown => (value === '' ? undefined : value);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['production', 'development', 'test']).default('production'),
   PORT: z.coerce.number().int().positive().default(8080),
@@ -29,14 +32,20 @@ const envSchema = z.object({
   SESSION_TTL_HOURS: z.coerce.number().int().positive().default(8),
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
 
-  S3_ENDPOINT: z.string().url(),
+  // Document storage driver: fs (default; bytes on a persistent disk volume) | s3 (S3-compatible).
+  STORAGE_DRIVER: z.enum(['fs', 's3']).default('fs'),
+  // fs driver: absolute path to the mounted persistent volume where document bytes live.
+  DOCUMENTS_DIR: z.string().default('/data/documents'),
+  DOCUMENT_MAX_BYTES: z.coerce.number().int().positive().default(10_485_760),
+
+  // s3 driver only — required (and validated below) when STORAGE_DRIVER=s3, ignored otherwise.
+  S3_ENDPOINT: z.preprocess(emptyToUndefined, z.string().url().optional()),
   S3_REGION: z.string().default('us-east-1'),
   S3_BUCKET: z.string().default('cct-documents'),
-  S3_ACCESS_KEY: z.string().min(1),
-  S3_SECRET_KEY: z.string().min(1),
+  S3_ACCESS_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  S3_SECRET_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   S3_FORCE_PATH_STYLE: booleanFromString.default('true'),
   S3_SIGNED_URL_TTL: z.coerce.number().int().positive().default(86400),
-  DOCUMENT_MAX_BYTES: z.coerce.number().int().positive().default(10_485_760),
 
   ANTHROPIC_API_KEY: z.string().min(1),
   INTERVIEW_MODEL: z.string().default('claude-opus-4-8'),
@@ -50,6 +59,19 @@ const envSchema = z.object({
   ADMIN_PASSWORD: z.string().optional(),
 
   WEB_DIST_DIR: z.string().optional(),
+}).superRefine((env, ctx) => {
+  // When using the s3 driver, the connection vars become mandatory (the fs driver ignores them).
+  if (env.STORAGE_DRIVER === 's3') {
+    for (const key of ['S3_ENDPOINT', 'S3_ACCESS_KEY', 'S3_SECRET_KEY'] as const) {
+      if (!env[key]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is required when STORAGE_DRIVER=s3`,
+        });
+      }
+    }
+  }
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

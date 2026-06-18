@@ -5,19 +5,23 @@ runbook is the procedure the deploy stage follows once `deployment_config.md` is
 `config_confirmed: true` and the audit shows 0 blockers.
 
 > **Precondition (HARD STOP):** `deployment_config.md` must have NO `<<REQUIRED>>` placeholders left. Secrets
-> (DB password, `SESSION_SECRET`, S3 keys, `ANTHROPIC_API_KEY`) are owner-supplied and set in Coolify only —
+> (DB password, `SESSION_SECRET`, `ANTHROPIC_API_KEY`) are owner-supplied and set in Coolify only —
 > never committed, never written into any tracked record.
 
 ---
 
 ## 0. What you are creating
 
-- **3 containers:** `cct-app` (Fastify + React build), `cct-postgres` (PostgreSQL 16), `cct-minio` (object storage).
-- **2 persistent volumes:** `postgres-data`, `documents-objects`. **Mandatory** — without `documents-objects`,
-  uploaded documents vanish on every redeploy (Coolify recreates the app container each deploy).
+Default (`STORAGE_DRIVER=fs`):
+- **2 containers:** `cct-app` (Fastify + React build), `cct-postgres` (PostgreSQL 16).
+- **2 persistent volumes:** `postgres-data`, and `documents-objects` mounted **into the app** at `/data/documents`
+  for document bytes. **Mandatory** — without it, uploaded documents vanish on every redeploy (Coolify recreates
+  the app container each deploy).
+
+Optional (`STORAGE_DRIVER=s3`): add a 3rd container `cct-minio` (or point `S3_*` at external S3/R2) — see §2.
 
 The `docker-compose.yml` in this folder is the deployment descriptor; Coolify can consume it directly, or you
-create the three services individually and point the app at the other two by their internal service hostnames.
+create the services individually and point the app at the DB by its internal service hostname.
 
 ---
 
@@ -30,16 +34,21 @@ create the three services individually and point the app at the other two by the
 4. Note the internal service hostname (e.g. `cct-postgres`). Your `DATABASE_URL` is:
    `postgres://cct_app:<password>@cct-postgres:5432/customs_control_tower`.
 
-## 2. Create the MinIO service (`cct-minio`)
+## 2. Set up document storage
 
-1. Add a **MinIO** service named `cct-minio` (image `minio/minio`, command `server /data --console-address ":9001"`).
-2. Set `MINIO_ROOT_USER` = your `S3_ACCESS_KEY` and `MINIO_ROOT_PASSWORD` = your `S3_SECRET_KEY`.
-3. Attach the named volume `documents-objects` to `/data`.
-4. After it starts, create the bucket `cct-documents` (MinIO console or `mc mb`).
-5. The app's `S3_ENDPOINT` is the internal MinIO URL (e.g. `http://cct-minio:9000`); keep `S3_FORCE_PATH_STYLE=true`.
+**Default — disk volume (`STORAGE_DRIVER=fs`), simplest:**
+1. On the `cct-app` application in Coolify, add a **Persistent Storage** mount: name `documents-objects`, mount path
+   `/data/documents`.
+2. Set app env `STORAGE_DRIVER=fs` and `DOCUMENTS_DIR=/data/documents` (both are the defaults).
+3. That's it — no extra service, no keys, no bucket. Back up the volume as part of normal VPS backups.
 
-> Alternative: point `S3_*` at an external S3/Backblaze bucket instead of MinIO. The app code is provider-agnostic;
-> only the env vars differ.
+**Optional — S3-compatible (`STORAGE_DRIVER=s3`), for scale / external storage later:**
+1. Either deploy MinIO (uncomment the `cct-minio` service in `docker-compose.yml`, or add it as a Docker Compose
+   resource): image `minio/minio`, command `server /data --console-address ":9001"`, `MINIO_ROOT_USER`=`S3_ACCESS_KEY`,
+   `MINIO_ROOT_PASSWORD`=`S3_SECRET_KEY`, volume `documents-objects`→`/data`, then create the bucket `cct-documents`;
+   **or** point `S3_*` at an external S3 / Cloudflare R2 bucket.
+2. Set app env `STORAGE_DRIVER=s3`, `S3_ENDPOINT` (e.g. `http://cct-minio:9000`), `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
+   `S3_BUCKET=cct-documents`, `S3_FORCE_PATH_STYLE=true`. **No code change** — the switch is purely env.
 
 ## 3. Create the app (`cct-app`)
 
@@ -49,10 +58,12 @@ create the three services individually and point the app at the other two by the
    - `NODE_ENV=production`, `PORT=8080`, `PUBLIC_BASE_URL=https://<your domain>`, `DEFAULT_LOCALE=es`.
    - `DATABASE_URL` (from step 1).
    - `SESSION_SECRET` — 32+ random bytes: `openssl rand -hex 32`.
-   - `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET=cct-documents`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE=true`.
+   - `STORAGE_DRIVER=fs`, `DOCUMENTS_DIR=/data/documents` (default disk storage; see §2). For S3 instead, set
+     `STORAGE_DRIVER=s3` + the `S3_*` vars.
    - `ANTHROPIC_API_KEY` (Coolify secret), `INTERVIEW_MODEL=claude-opus-4-8`, `FRESHNESS_MODEL=claude-haiku-4-5`.
    - `ADMIN_EMAIL`, `ADMIN_PASSWORD` (used once by the seed; rotate the password after first login).
-3. Expose port `8080`. Attach the domain; enable SSL (Coolify / Let's Encrypt).
+3. Add the **Persistent Storage** mount from §2 (`/data/documents`). Expose port `8080`. Attach the domain; enable
+   SSL (Coolify / Let's Encrypt).
 
 ## 4. Run migrations against the live DB
 

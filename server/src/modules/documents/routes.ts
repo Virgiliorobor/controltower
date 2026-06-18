@@ -72,11 +72,23 @@ export async function registerDocumentsRoutes(
     return { document: { ...document, size_bytes: document.size_bytes?.toString() ?? null } };
   });
 
-  // Metadata + a short-lived signed retrieval URL.
+  // Metadata + a retrieval URL (s3: presigned object-store URL; fs: the streaming route below).
   app.get('/api/v1/documents/:id', anyAuth, async (request) => {
     const { id } = idParam.parse(request.params);
     const { document, url } = await service.getMetadataWithUrl(id);
     return { document: { ...document, size_bytes: document.size_bytes?.toString() ?? null }, url };
+  });
+
+  // Stream the document bytes (used by the fs storage driver; auth via the session cookie). Same-origin, so the
+  // SPA can point an <iframe>/<img>/download link straight at this URL.
+  app.get('/api/v1/documents/:id/content', anyAuth, async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    const { bytes, contentType, filename } = await service.readContent(id);
+    const safeName = filename.replace(/[\r\n"]/g, '');
+    reply.header('Content-Type', contentType);
+    reply.header('Content-Disposition', `inline; filename="${safeName}"`);
+    reply.header('Cache-Control', 'private, no-store');
+    return reply.send(bytes);
   });
 
   app.patch('/api/v1/documents/:id', editor, async (request) => {
