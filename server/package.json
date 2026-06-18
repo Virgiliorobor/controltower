@@ -33,12 +33,12 @@
     "croner": "^8.1.2",
     "fastify": "^5.1.0",
     "pino": "^9.5.0",
+    "prisma": "^5.22.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.9.0",
-    "prisma": "^5.22.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
   }

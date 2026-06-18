@@ -78,5 +78,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/readyz || exit 1
 
-# Start the server. Migrations are a SEPARATE Coolify release step (`npm run migrate`).
-CMD ["node", "dist/index.js"]
+# Run migrations then start the server. `prisma migrate deploy` is idempotent — safe on every
+# startup and required on the first deploy to create tables before the app queries them.
+# `prisma` CLI is a production dependency so it is available in this runtime image.
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/index.js"]
