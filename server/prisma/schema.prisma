@@ -9,7 +9,11 @@
 // orthogonal channels. RLS is applied in a dedicated migration (viewer = SELECT-only; audit_events append-only).
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // node:20-alpine uses Alpine 3.20+ which ships OpenSSL 3.x (not 1.1.x).
+  // Without this target, prisma generate picks linux-musl (OpenSSL 1.1.x) and
+  // the engine fails to load at runtime because the 1.1.x .so is not available.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
