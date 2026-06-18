@@ -1,47 +1,179 @@
-// VIEW 2 — Process Map (Mapa del Proceso), THE PRIMARY VIEW. Dark board cockpit. React Flow, left-to-right,
-// nodes = steps (3 channels), edges = handoffs (4 kinds). Pan/zoom/Fit (default Fit) + mini-map + reset.
-// Click a node → opens the Step Detail panel (overlay on the right; map stays visible — D0-2/DC-9), driven by
-// the ?step= query param. Seed/draft banner while steps are INFERRED. Filters dim non-matching nodes (never
-// remove). Editors get "+ Paso" and "Editar conexiones". Empty/loading/error/permission states per design_spec.
+// VIEW 2 — Process Map (Mapa del Proceso). Horizontal scrollable card flow.
+// Replaced React Flow canvas with a plain CSS/React card row — no canvas sizing or fitView issues.
+// Steps are dark cards arranged left-to-right with SVG arrow connectors. Non-sequential edges
+// (branch/loop/parallel) shown as coloured chips on the source card. Click a card → StepDetailPanel.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import ReactFlow, {
-  Background,
-  BackgroundVariant,
-  Controls,
-  MiniMap,
-  ReactFlowProvider,
-  useReactFlow,
-  type Node,
-} from 'reactflow';
-import 'reactflow/dist/style.css';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../i18n/I18nContext';
 import { useFreshness, useProcessMap, errorMessage } from '../lib/hooks';
 import { countUnconfirmed } from '../lib/endpoints';
 import { pickBilingual } from '../i18n/bilingual';
-import { StepNode, type StepNodeData } from '../components/map/StepNode';
-import { edgeTypes } from '../components/map/edges';
-import { layoutGraph } from '../components/map/layout';
+import { StatusGlyph } from '../components/channels';
 import { Legend } from '../components/map/Legend';
 import { ErrorStrip, GhostButton, PrimaryButton } from '../components/primitives';
 import { StepDetailPanel } from '../components/StepDetailPanel';
 import { StepFormModal } from '../components/StepFormModal';
 import { ConnectionsModal } from '../components/ConnectionsModal';
-import type { GraphNode } from '../lib/types';
-
-const nodeTypes = { step: StepNode };
+import type { GraphEdge, GraphNode } from '../lib/types';
+import type { Locale } from '../i18n/strings';
 
 type Filter = 'none' | 'red' | 'unowned' | 'noDoc';
 
-function MapInner(): JSX.Element {
+const EDGE_COLOR: Record<string, string> = {
+  sequential: '#3A4A55',
+  branch: '#F4A83A',
+  loop: '#8B9AA6',
+  parallel: '#3FB6C9',
+};
+
+const EDGE_SYMBOL: Record<string, string> = {
+  branch: '⑂',
+  loop: '↩',
+  parallel: '∥',
+};
+
+function StepCard({
+  node,
+  outEdges,
+  seqOf,
+  locale,
+  selected,
+  dimmed,
+  freshnessActive,
+  onClick,
+}: {
+  node: GraphNode;
+  outEdges: GraphEdge[];
+  seqOf: Map<string, number>;
+  locale: Locale;
+  selected: boolean;
+  dimmed: boolean;
+  freshnessActive: boolean;
+  onClick: () => void;
+}): JSX.Element {
+  const critical = node.classification === 'CRITICAL';
+  const dashed = node.confidence !== 'CONFIRMED';
+  const inferred = node.confidence === 'INFERRED';
+  const borderColor = selected ? '#3FB6C9' : '#2C3A45';
+  const title = pickBilingual(locale, node.title_es, node.title_en);
+  const nonSeqEdges = outEdges.filter(e => e.kind !== 'sequential');
+
+  return (
+    <div
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter') onClick(); }}
+      style={{
+        background: '#1E2932',
+        border: `2px ${dashed ? 'dashed' : 'solid'} ${borderColor}`,
+        borderRadius: 4,
+        opacity: dimmed ? 0.35 : inferred ? 0.88 : 1,
+        boxShadow: selected ? '0 0 0 3px rgba(63,182,201,0.35)' : 'none',
+        width: 184,
+        minHeight: 110,
+        cursor: 'pointer',
+        position: 'relative',
+        flexShrink: 0,
+        padding: critical ? '8px 10px 8px 15px' : '8px 10px',
+      }}
+      className="font-ui text-ink-onboard"
+    >
+      {critical && (
+        <span
+          aria-hidden
+          style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: '#2E94A4', borderRadius: '4px 0 0 4px' }}
+        />
+      )}
+
+      {/* Sequence + RAG */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+        <span style={{ fontFamily: 'monospace', fontSize: 17, lineHeight: 1, color: '#E4EAEF', fontWeight: 500 }}>
+          {node.sequence_index}
+        </span>
+        <StatusGlyph status={node.rag_status} surface="board" size={14} />
+      </div>
+
+      {/* Title */}
+      <div
+        style={{
+          fontSize: 12,
+          lineHeight: 1.35,
+          fontWeight: critical ? 600 : 500,
+          color: '#E4EAEF',
+          display: '-webkit-box',
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          marginBottom: 6,
+        }}
+      >
+        {title}
+      </div>
+
+      {/* Owner */}
+      <div style={{ fontSize: 11, color: '#8B9AA6', marginBottom: 4 }}>
+        {node.has_owner_gap ? (
+          <span style={{ border: '1px solid #8B9AA6', borderRadius: 2, padding: '0 3px', fontSize: 10 }}>
+            ○ Sin dueño
+          </span>
+        ) : (
+          <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {node.owner?.name ?? ''}
+          </span>
+        )}
+      </div>
+
+      {/* Non-sequential edge chips (branch/loop/parallel targets) */}
+      {nonSeqEdges.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginBottom: 2 }}>
+          {nonSeqEdges.map(e => (
+            <span
+              key={e.id}
+              title={e.condition_es ?? e.kind}
+              style={{
+                fontSize: 10,
+                color: EDGE_COLOR[e.kind] ?? '#8B9AA6',
+                border: `1px solid ${EDGE_COLOR[e.kind] ?? '#8B9AA6'}`,
+                borderRadius: 2,
+                padding: '0 3px',
+                lineHeight: 1.6,
+              }}
+            >
+              {EDGE_SYMBOL[e.kind] ?? '→'} P{seqOf.get(e.to_step_id) ?? '?'}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Foot icons */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, fontSize: 11, color: '#8B9AA6', marginTop: 4 }}>
+        {node.document_count > 0 && <span title="documentos">▤{node.document_count}</span>}
+        {freshnessActive && <span style={{ color: '#F4A83A' }} title="alerta de frescura">!</span>}
+      </div>
+    </div>
+  );
+}
+
+function Arrow(): JSX.Element {
+  return (
+    <div style={{ width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <svg width="28" height="16" viewBox="0 0 28 16" fill="none">
+        <line x1="0" y1="8" x2="20" y2="8" stroke="#2C3A45" strokeWidth="1.5" />
+        <polygon points="20,4 28,8 20,12" fill="#2C3A45" />
+      </svg>
+    </div>
+  );
+}
+
+export default function MapView(): JSX.Element {
   const { processId } = useParams();
   const { t, locale } = useI18n();
   const { isEditor } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedStepId = searchParams.get('step');
-  const rf = useReactFlow();
 
   const { data: graph, isLoading, isError, error, refetch } = useProcessMap(processId);
   const { data: freshness } = useFreshness(processId);
@@ -50,7 +182,7 @@ function MapInner(): JSX.Element {
   const [showConnections, setShowConnections] = useState(false);
 
   const freshnessStepIds = useMemo(
-    () => new Set((freshness?.flags ?? []).map((f) => f.step_id).filter((x): x is string => Boolean(x))),
+    () => new Set((freshness?.flags ?? []).map(f => f.step_id).filter((x): x is string => Boolean(x))),
     [freshness],
   );
 
@@ -67,53 +199,32 @@ function MapInner(): JSX.Element {
     return ids;
   }, [graph, filter]);
 
-  const { rfNodes, rfEdges } = useMemo(() => {
-    if (!graph) return { rfNodes: [] as Node<StepNodeData>[], rfEdges: [] };
-    return layoutGraph({
-      nodes: graph.nodes,
-      edges: graph.edges,
-      selectedId: selectedStepId,
-      dimmedIds,
-      freshnessStepIds,
-      titleOf: (n: GraphNode) => {
-        const titleText = pickBilingual(locale, n.title_es, n.title_en);
-        const enGloss = locale === 'en' && n.title_en && n.title_en !== n.title_es ? n.title_es : null;
-        return { titleText, enGloss };
-      },
-      ownerLabelOf: (n: GraphNode) => n.owner?.name ?? '',
-      ownerGapLabel: t('step.noOwner'),
-    });
-  }, [graph, selectedStepId, dimmedIds, freshnessStepIds, locale, t]);
-
-  // Default Fit on load / when the node set changes.
-  // 200ms gives React Flow's ResizeObserver time to measure node heights before fitView
-  // calculates the bounding box. setTimeout(0) races with measurement and can produce
-  // a wrong viewport (nodes positioned off-screen or stacked at the canvas edge).
-  useEffect(() => {
-    if (rfNodes.length > 0) {
-      const id = window.setTimeout(() => rf.fitView({ padding: 0.2, duration: 0 }), 200);
-      return () => window.clearTimeout(id);
-    }
-    return undefined;
-  }, [rf, rfNodes.length, processId]);
-
-  // Secondary fitView on React Flow init. Fires when React Flow first mounts and measures
-  // the container. If nodes are already in rfNodes at that point, fit immediately.
-  const onRfInit = useCallback(() => {
-    if (rfNodes.length > 0) rf.fitView({ padding: 0.2, duration: 0 });
-  }, [rf, rfNodes.length]);
-
-  const onNodeClick = useCallback(
-    (_: unknown, node: Node<StepNodeData>) => {
-      setSearchParams({ step: node.id });
-    },
-    [setSearchParams],
+  const orderedNodes = useMemo(
+    () => (graph ? [...graph.nodes].sort((a, b) => a.sequence_index - b.sequence_index) : []),
+    [graph],
   );
 
-  const closePanel = useCallback(() => setSearchParams({}), [setSearchParams]);
+  const seqOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const n of orderedNodes) m.set(n.id, n.sequence_index);
+    return m;
+  }, [orderedNodes]);
+
+  const edgesBySource = useMemo(() => {
+    const m = new Map<string, GraphEdge[]>();
+    for (const e of (graph?.edges ?? [])) {
+      const arr = m.get(e.from_step_id) ?? [];
+      arr.push(e);
+      m.set(e.from_step_id, arr);
+    }
+    return m;
+  }, [graph]);
 
   const unconfirmed = graph ? countUnconfirmed(graph.nodes) : 0;
   const seedBanner = graph && unconfirmed > 0;
+
+  const onCardClick = useCallback((id: string) => setSearchParams({ step: id }), [setSearchParams]);
+  const closePanel = useCallback(() => setSearchParams({}), [setSearchParams]);
 
   if (isError) {
     return (
@@ -123,9 +234,12 @@ function MapInner(): JSX.Element {
     );
   }
 
+  const overlayTop = seedBanner ? 40 : 8;
+
   return (
-    <div className="relative flex-1" style={{ height: 'calc(100vh - 48px)' }}>
-      {/* Seed/draft banner (visual_spec §3). */}
+    <div className="relative flex-1 bg-board-bg" style={{ height: 'calc(100vh - 48px)', overflow: 'hidden' }}>
+
+      {/* Seed/draft banner */}
       {seedBanner && (
         <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 border-b border-status-amber bg-status-amber/10 px-4 py-2 text-2xs text-status-amber">
           <span>
@@ -136,7 +250,9 @@ function MapInner(): JSX.Element {
               type="button"
               className="underline"
               onClick={() => {
-                const first = [...graph.nodes].sort((a, b) => a.sequence_index - b.sequence_index).find((n) => n.confidence !== 'CONFIRMED');
+                const first = [...graph.nodes]
+                  .sort((a, b) => a.sequence_index - b.sequence_index)
+                  .find(n => n.confidence !== 'CONFIRMED');
                 if (first) setSearchParams({ step: first.id });
               }}
             >
@@ -147,7 +263,7 @@ function MapInner(): JSX.Element {
       )}
 
       {/* Toolbar */}
-      <div className={`absolute ${seedBanner ? 'top-10' : 'top-2'} left-2 z-20 flex flex-wrap items-center gap-2`}>
+      <div className="absolute left-2 z-20 flex flex-wrap items-center gap-2" style={{ top: overlayTop }}>
         {isEditor && (
           <>
             <PrimaryButton onClick={() => setShowAddStep(true)} className="py-1 text-2xs">
@@ -160,7 +276,7 @@ function MapInner(): JSX.Element {
         )}
         <select
           value={filter}
-          onChange={(e) => setFilter(e.target.value as Filter)}
+          onChange={e => setFilter(e.target.value as Filter)}
           className="rounded-sm border border-board-line bg-board-raised px-2 py-1 text-2xs text-ink-onboard"
         >
           <option value="none">{t('common.filter')}…</option>
@@ -170,10 +286,12 @@ function MapInner(): JSX.Element {
         </select>
       </div>
 
-      <div className={`absolute ${seedBanner ? 'top-10' : 'top-2'} right-2 z-20 w-64`}>
+      {/* Legend */}
+      <div className="absolute right-2 z-20 w-64" style={{ top: overlayTop }}>
         <Legend />
       </div>
 
+      {/* Loading */}
       {isLoading && (
         <div className="flex h-full items-center justify-center">
           <div className="flex flex-col items-center gap-2 text-ink-onboard-muted">
@@ -185,7 +303,8 @@ function MapInner(): JSX.Element {
         </div>
       )}
 
-      {graph && graph.nodes.length === 0 && (
+      {/* Empty */}
+      {graph && graph.nodes.length === 0 && !isLoading && (
         <div className="flex h-full items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-center">
             <div className="rounded-sm border-2 border-dashed border-board-line px-8 py-6 text-ink-onboard-muted">
@@ -196,39 +315,41 @@ function MapInner(): JSX.Element {
         </div>
       )}
 
-      {graph && graph.nodes.length > 0 && (
-        <ReactFlow
-          nodes={rfNodes}
-          edges={rfEdges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onNodeClick={onNodeClick}
-          onPaneClick={closePanel}
-          onInit={onRfInit}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
-          defaultViewport={{ x: 20, y: 80, zoom: 0.5 }}
-          minZoom={0.15}
-          maxZoom={2}
-          proOptions={{ hideAttribution: true }}
-          nodesDraggable={false}
-          nodesConnectable={false}
+      {/* Process flow — horizontal scrollable card row */}
+      {graph && graph.nodes.length > 0 && !isLoading && (
+        <div
+          style={{
+            position: 'absolute',
+            top: overlayTop + 36,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            overflowX: 'auto',
+            overflowY: 'auto',
+            padding: '20px 24px',
+          }}
         >
-          {/* Dot color #13202B contrasts with node background #1E2932 so nodes are visible at small zoom. */}
-          <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#13202B" />
-          <Controls showInteractive={false} />
-          <MiniMap
-            pannable
-            zoomable
-            nodeColor="#1E2932"
-            nodeStrokeColor="#2C3A45"
-            maskColor="rgba(14,20,25,0.7)"
-            style={{ background: '#161E26', border: '1px solid #2C3A45' }}
-          />
-        </ReactFlow>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 0, minHeight: 140 }}>
+            {orderedNodes.map((node, idx) => (
+              <div key={node.id} style={{ display: 'flex', alignItems: 'center' }}>
+                <StepCard
+                  node={node}
+                  outEdges={edgesBySource.get(node.id) ?? []}
+                  seqOf={seqOf}
+                  locale={locale}
+                  selected={node.id === selectedStepId}
+                  dimmed={dimmedIds.has(node.id)}
+                  freshnessActive={freshnessStepIds.has(node.id)}
+                  onClick={() => onCardClick(node.id)}
+                />
+                {idx < orderedNodes.length - 1 && <Arrow />}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
-      {/* Step Detail panel — overlay on the right, map stays visible. */}
+      {/* Step Detail panel — overlay on the right */}
       {selectedStepId && processId && (
         <StepDetailPanel stepId={selectedStepId} processId={processId} onClose={closePanel} />
       )}
@@ -246,14 +367,5 @@ function MapInner(): JSX.Element {
         />
       )}
     </div>
-  );
-}
-
-export default function MapView(): JSX.Element {
-  const { processId } = useParams();
-  return (
-    <ReactFlowProvider key={processId}>
-      <MapInner />
-    </ReactFlowProvider>
   );
 }
