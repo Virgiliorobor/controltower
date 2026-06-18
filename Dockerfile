@@ -40,6 +40,14 @@ FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
+# OpenSSL is required at runtime for two reasons:
+# 1. Prisma's engine-selection logic probes the system OpenSSL version. Without it, Prisma
+#    defaults to "openssl-1.1.x" and tries to load libquery_engine-linux-musl.so.node, which
+#    requires libssl.so.1.1 — not present on Alpine 3.20+.
+# 2. The linux-musl-openssl-3.0.x engine (declared in schema.prisma binaryTargets) links
+#    against libssl.so.3, provided by the openssl package.
+RUN apk add --no-cache openssl
+
 # Install production dependencies from the workspace root (reproducible from the lockfile).
 # Web prod deps (React etc.) are already bundled in the Vite output; they add ~20 MB here
 # but are harmless and keep the single-lockfile approach consistent.
