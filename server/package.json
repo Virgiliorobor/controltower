@@ -12,11 +12,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "migrate": "prisma migrate deploy",
     "prisma:generate": "prisma generate",
-    "seed": "node --loader ts-node/esm src/seed/seed.ts",
+    "seed": "node dist/seed/seed.js",
     "start": "node dist/index.js"
   },
   "prisma": {
-    "seed": "node --loader ts-node/esm src/seed/seed.ts"
+    "seed": "node dist/seed/seed.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
