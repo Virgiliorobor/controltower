@@ -51,9 +51,13 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext, mod: A
     const result = await service.login(body.email, body.password, {
       session_id: request.session?.session_id,
     });
+    // Use the actual forwarded protocol so the cookie works behind Traefik (HTTP internally,
+    // HTTPS externally). Falls back to NODE_ENV so it also works with direct HTTP access during
+    // testing. Avoids the common "Secure cookie silently dropped on HTTP" deployment trap.
+    const isSecure = request.protocol === 'https' || secure;
     void reply.setCookie(SESSION_COOKIE, result.session_id, {
       httpOnly: true,
-      secure,
+      secure: isSecure,
       sameSite: 'strict',
       signed: true,
       path: '/',
