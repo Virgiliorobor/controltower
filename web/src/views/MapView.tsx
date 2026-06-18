@@ -25,6 +25,7 @@ import { StepNode, type StepNodeData } from '../components/map/StepNode';
 import { edgeTypes } from '../components/map/edges';
 import { layoutGraph } from '../components/map/layout';
 import { Legend } from '../components/map/Legend';
+import { SwimLanes } from '../components/map/SwimLanes';
 import { ErrorStrip, GhostButton, PrimaryButton } from '../components/primitives';
 import { StepDetailPanel } from '../components/StepDetailPanel';
 import { StepFormModal } from '../components/StepFormModal';
@@ -113,6 +114,9 @@ function MapInner(): JSX.Element {
 
   return (
     <div className="relative h-full overflow-hidden">
+      {/* Geographic zone bands — rendered first so they sit behind everything else (DOM order). */}
+      <SwimLanes />
+
       {/* Seed/draft banner (visual_spec §3). */}
       {seedBanner && (
         <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 border-b border-status-amber bg-status-amber/10 px-4 py-2 text-2xs text-status-amber">

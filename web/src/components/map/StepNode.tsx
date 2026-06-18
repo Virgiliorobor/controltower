@@ -8,6 +8,7 @@
 
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { StatusGlyph } from '../channels';
+import { StepTypeIcon } from './StepTypeIcon';
 import type { GraphNode } from '../../lib/types';
 
 export interface StepNodeData {
@@ -51,7 +52,10 @@ export function StepNode({ data }: NodeProps<StepNodeData>): JSX.Element {
       )}
       <div style={{ padding: '8px 10px 8px 12px' }}>
         <div className="flex items-start justify-between gap-2">
-          <span className="font-mono text-lg tabular-nums leading-none text-ink-onboard">{node.sequence_index}</span>
+          <div className="flex items-center gap-1">
+            <span className="font-mono text-lg tabular-nums leading-none text-ink-onboard">{node.sequence_index}</span>
+            <StepTypeIcon stepType={node.step_type} className="text-ink-onboard-muted" />
+          </div>
           {/* HEALTH hue glyph (channel 1). */}
           <StatusGlyph status={node.rag_status} surface="board" size={15} />
         </div>

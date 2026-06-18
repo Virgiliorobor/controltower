@@ -4,7 +4,16 @@
 import { useState } from 'react';
 import { useI18n } from '../../i18n/I18nContext';
 import { StatusStamp } from '../channels';
-import type { RagStatus } from '../../lib/types';
+import { StepTypeIcon } from './StepTypeIcon';
+import type { RagStatus, StepType } from '../../lib/types';
+
+const ZONE_SWATCHES = [
+  { key: 'us', labelKey: 'map.zone.us', color: 'rgba(96,148,210,0.50)' },
+  { key: 'border', labelKey: 'map.zone.border', color: 'rgba(210,165,75,0.50)' },
+  { key: 'mx', labelKey: 'map.zone.mx', color: 'rgba(63,182,175,0.50)' },
+] as const;
+
+const STEP_TYPES: StepType[] = ['DOCUMENTATION', 'VERIFICATION', 'ROUTING', 'COMMUNICATION', 'TRANSFORMATION'];
 
 function EdgeSwatch({ kind }: { kind: 'sequential' | 'branch' | 'loop' | 'parallel' }): JSX.Element {
   return (
@@ -82,6 +91,33 @@ export function Legend(): JSX.Element {
                 <span key={k} className="inline-flex items-center gap-2">
                   <EdgeSwatch kind={k} />
                   {t(`map.edge.${k}`)}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1 uppercase tracking-label text-ink-onboard-muted">{t('map.legend.zones')}</div>
+            <div className="flex flex-col gap-1">
+              {ZONE_SWATCHES.map((z) => (
+                <span key={z.key} className="inline-flex items-center gap-2">
+                  <span
+                    className="inline-block h-2 w-4 flex-shrink-0 rounded-none"
+                    style={{ background: z.color }}
+                  />
+                  <span style={{ color: z.color }}>{t(z.labelKey)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1 uppercase tracking-label text-ink-onboard-muted">{t('map.legend.stepTypes')}</div>
+            <div className="flex flex-col gap-1">
+              {STEP_TYPES.map((st) => (
+                <span key={st} className="inline-flex items-center gap-2">
+                  <StepTypeIcon stepType={st} className="text-ink-onboard-muted" />
+                  {t(`steptype.${st}`)}
                 </span>
               ))}
             </div>
