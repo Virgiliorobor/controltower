@@ -1,11 +1,8 @@
 // VIEW 2 — Process Map (Mapa del Proceso), THE PRIMARY VIEW. Dark board cockpit. React Flow, left-to-right,
-// nodes = steps (3 channels), edges = handoffs (4 kinds). Pan/zoom/Fit (Controls button) + mini-map + reset.
-// Click a node → opens the Step Detail panel (overlay on the right; map stays visible — D0-2/DC-9), driven by
-// the ?step= query param. Seed/draft banner while steps are INFERRED. Filters dim non-matching nodes (never remove).
-// Editors get "+ Paso" and "Editar conexiones". Empty/loading/error/permission states per design_spec.
-//
-// Viewport: defaultViewport at zoom=0.6, nodes visible immediately. No fitView prop — avoids the ResizeObserver
-// race where fitView fires before React Flow has measured its container. Users click Controls ⊡ to fit all nodes.
+// nodes = steps (3 channels), edges = handoffs (4 kinds). Pan/zoom/Fit + mini-map.
+// Layout: dagre auto-positions nodes in 2D — branches fan out vertically, loops arc back, sequential flows right.
+// Click a node → opens the Step Detail panel (overlay on the right; map stays visible — D0-2/DC-9).
+// Seed/draft banner while steps are INFERRED. Filters dim non-matching nodes (never remove).
 
 import { useCallback, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
@@ -16,6 +13,7 @@ import ReactFlow, {
   MiniMap,
   ReactFlowProvider,
   type Node,
+  type ReactFlowInstance,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useAuth } from '../auth/AuthContext';
@@ -37,16 +35,13 @@ const nodeTypes = { step: StepNode };
 
 type Filter = 'none' | 'red' | 'unowned' | 'noDoc';
 
-// Nodes at flow position (0,0) at zoom=0.6 with this offset appear at canvas (40, 80) — below the banner,
-// with a left margin. Visible immediately on mount without any fitView timing dependency.
-const INITIAL_VIEWPORT = { x: 40, y: 80, zoom: 0.6 };
-
 function MapInner(): JSX.Element {
   const { processId } = useParams();
   const { t, locale } = useI18n();
   const { isEditor } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedStepId = searchParams.get('step');
+
 
   const { data: graph, isLoading, isError, error, refetch } = useProcessMap(processId);
   const { data: freshness } = useFreshness(processId);
@@ -89,6 +84,12 @@ function MapInner(): JSX.Element {
       ownerGapLabel: t('step.noOwner'),
     });
   }, [graph, selectedStepId, dimmedIds, freshnessStepIds, locale, t]);
+
+  // fitView via onInit: fires after React Flow has measured the container (now definite h-full).
+  // Using onInit instead of the fitView prop avoids a race with dagre position calculation.
+  const onInit = useCallback((instance: ReactFlowInstance) => {
+    instance.fitView({ padding: 0.15, duration: 300 });
+  }, []);
 
   const onNodeClick = useCallback(
     (_: unknown, node: Node<StepNodeData>) => {
@@ -191,20 +192,19 @@ function MapInner(): JSX.Element {
           edgeTypes={edgeTypes}
           onNodeClick={onNodeClick}
           onPaneClick={closePanel}
-          defaultViewport={INITIAL_VIEWPORT}
-          minZoom={0.15}
+          onInit={onInit}
+          minZoom={0.1}
           maxZoom={2}
           proOptions={{ hideAttribution: true }}
           nodesDraggable={false}
           nodesConnectable={false}
         >
-          {/* Dot color #13202B is darker than node background #1E2932 — nodes visible at any zoom. */}
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#13202B" />
           <Controls showInteractive={false} />
           <MiniMap
             pannable
             zoomable
-            nodeColor="#2C3A45"
+            nodeColor="#253545"
             nodeStrokeColor="#3A4A55"
             maskColor="rgba(14,20,25,0.7)"
             style={{ background: '#161E26', border: '1px solid #2C3A45' }}
